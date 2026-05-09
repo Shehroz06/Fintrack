@@ -125,7 +125,7 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>💰 Personal Finance Management System</h1>
-        <p className="subtitle">AI-Powered Financial Planning</p>
+        <p className="subtitle">Smart Rule-Based Financial Planning</p>
       </header>
 
       <nav className="app-nav">
@@ -151,7 +151,7 @@ function App() {
           className={`nav-btn ${activeTab === 'recommendations' ? 'active' : ''}`}
           onClick={() => setActiveTab('recommendations')}
         >
-          ✨ AI Recommendations
+          ✨ Smart Insights
         </button>
         <button 
           className={`nav-btn ${activeTab === 'reports' ? 'active' : ''}`}
@@ -254,7 +254,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Personal Finance Management System © 2024 | Powered by AI</p>
+        <p>Personal Finance Management System © 2024 | Powered by Smart Rules</p>
       </footer>
     </div>
   );

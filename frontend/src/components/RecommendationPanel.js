@@ -15,7 +15,7 @@ function RecommendationPanel({ recommendations }) {
     return <div className="section">Loading recommendations...</div>;
   }
 
-  const { userMetrics = {}, stateRecommendations = {}, aiRecommendations = [] } = recommendations;
+  const { userMetrics = {}, stateRecommendations = {}, aiRecommendations = [], conditionalRecommendations = aiRecommendations } = recommendations;
 
   return (
     <div className="recommendations-panel">
@@ -58,9 +58,9 @@ function RecommendationPanel({ recommendations }) {
       </div>
 
       <div className="section">
-        <h2>✨ AI-Powered Insights</h2>
+        <h2>✨ Smart Insights</h2>
         <div className="recommendations-list">
-          {aiRecommendations.map((rec, idx) => (
+          {(conditionalRecommendations || aiRecommendations).map((rec, idx) => (
             <div key={idx} className={`recommendation-item priority-${rec.priority}`}>
               <span className="priority-badge">{rec.priority?.toUpperCase()}</span>
               <div className="recommendation-content">

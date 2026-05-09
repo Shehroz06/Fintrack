@@ -1,23 +1,23 @@
-# Personal Finance Management System with AI Recommendations
+# Personal Finance Management System with Conditional Recommendations
 
 ## 📋 Project Overview
 
-A full-stack personal finance management system with **AI-powered recommendations** using Google Gemini API. The system helps users track income, expenses, investments, and savings goals while providing intelligent financial advice based on their spending patterns.
+A full-stack personal finance management system with **conditional, rule-based recommendations**. The system helps users track income, expenses, investments, and savings goals while providing actionable financial guidance based on spending patterns, savings rate, and financial state.
 
 **Tech Stack:**
 - **Frontend:** React.js + CSS3
 - **Backend:** Node.js + Express.js
 - **Database:** MySQL
-- **AI Integration:** Google Gemini API
+- **Recommendation Engine:** Local conditional structure and financial rules
 - **Architecture:** SOLID Principles + Design Patterns
 
 ---
 
-## 🎯 Key Features
+## Key Features
 
 ### 1. **Transaction Management**
 - Track income, expenses, investments, and savings
-- Auto-categorization using Gemini AI
+- Auto-categorization using local conditional rules
 - Multi-account support (savings, checking, investment)
 - Detailed transaction history and filtering
 
@@ -27,8 +27,8 @@ A full-stack personal finance management system with **AI-powered recommendation
 - Multiple goal types (vacation, emergency fund, etc.)
 - Goal completion status
 
-### 3. **AI-Powered Recommendations**
-- Personalized spending advice using Google Gemini
+### 3. **Conditional Recommendations**
+- Personalized spending advice using rule-based conditions
 - Category-wise spending analysis
 - Investment suggestions
 - State-based recommendations (Budgeting, Savings, Investment modes)
@@ -52,7 +52,7 @@ A full-stack personal finance management system with **AI-powered recommendation
 
 ---
 
-## 🏗️ Architecture & Design Patterns
+## Architecture & Design Patterns
 
 ### SOLID Principles Application
 
@@ -115,7 +115,7 @@ manager.getRecommendations(); // State-specific recommendations
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 finance-management-system/
@@ -125,7 +125,7 @@ finance-management-system/
 │   ├── BudgetingStrategy.js          # Strategy pattern - Budgeting strategies
 │   ├── CompositeAccount.js           # Composite pattern - Account hierarchy
 │   ├── FinancialState.js             # State pattern - Financial states
-│   ├── RecommendationEngine.js       # Gemini AI integration
+│   ├── RecommendationEngine.js       # Local conditional recommendation engine
 │   ├── Services.js                   # TransactionService, GoalTrackerService
 │   ├── server.js                     # Express server & routes
 │   ├── package.json                  # Backend dependencies
@@ -156,12 +156,12 @@ finance-management-system/
 
 ---
 
-## 🚀 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - Node.js v14+
 - MySQL 5.7+
-- Google Gemini API Key ([Get here](https://makersuite.google.com/app/apikey))
+- No external AI API key required
 - npm or yarn
 
 ### Step 1: Database Setup
@@ -189,7 +189,6 @@ DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_password
 DB_NAME=finance_management
-GEMINI_API_KEY=your_gemini_api_key
 PORT=5000
 NODE_ENV=development
 EOF
@@ -219,7 +218,7 @@ npm start
 
 ---
 
-## 📚 API Endpoints
+## API Endpoints
 
 ### Transactions
 ```
@@ -246,7 +245,7 @@ GET    /api/financial-state/:userId   # Get current state
 
 ### Recommendations
 ```
-POST   /api/recommendations/generate  # Generate AI recommendations
+POST   /api/recommendations/generate  # Generate conditional recommendations
 ```
 
 ### Portfolio
@@ -262,7 +261,7 @@ POST   /api/budgeting-strategy        # Calculate budget
 
 ---
 
-## 💻 Usage Examples
+## Usage Examples
 
 ### Example 1: Add a Transaction
 
@@ -303,7 +302,7 @@ curl -X POST http://localhost:5000/api/financial-state/switch \
   }'
 ```
 
-### Example 4: Generate AI Recommendations
+### Example 4: Generate Recommendations
 
 ```bash
 curl -X POST http://localhost:5000/api/recommendations/generate \
@@ -313,37 +312,32 @@ curl -X POST http://localhost:5000/api/recommendations/generate \
 
 ---
 
-## 🤖 AI Integration (Gemini API)
+## Conditional Recommendation Engine
 
-### How AI Works
+### How It Works
 
 1. **Transaction Categorization**
-   - User describes transaction: "bought groceries"
-   - Gemini AI categorizes: "food"
+   - User describes a transaction such as "bought groceries"
+   - The backend uses keyword and conditional matching to categorize it as "food"
 
 2. **Personalized Recommendations**
    - Analyzes spending patterns
    - Identifies high-spending categories
    - Suggests budget optimizations
-   - Recommends investment strategies
+   - Recommends investment strategies when conditions support it
 
 3. **Financial Health Assessment**
    - Evaluates savings rate
    - Checks goal progress
-   - Provides actionable insights
+   - Provides actionable insights based on current financial state
 
-### Gemini API Configuration
+### Recommendation Logic
 
-```javascript
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-```
+The recommendation engine now uses local conditional structure instead of an external AI API. This keeps the app deterministic, faster to start, and easier to run offline while still producing useful guidance.
 
 ---
 
-## 🎨 Frontend Components
+## Frontend Components
 
 ### Dashboard
 - Overview of financial metrics
@@ -362,7 +356,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 - Set deadlines
 
 ### Recommendation Panel
-- AI-powered suggestions
+- Conditional suggestions
 - State-specific recommendations
 - Financial health metrics
 - Priority-based alerts
@@ -379,7 +373,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
 ---
 
-## 🔐 Security Considerations
+## Security Considerations
 
 1. **Environment Variables**
    - Never commit .env files
@@ -399,7 +393,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
 ---
 
-## 📊 Database Schema
+## Database Schema
 
 ```sql
 -- Users table
@@ -464,7 +458,7 @@ CREATE TABLE recommendations (
 
 ---
 
-## 🧪 Testing the System
+## Testing the System
 
 ### Test Workflow
 
@@ -485,7 +479,7 @@ CREATE TABLE recommendations (
 
 4. **View Recommendations**
    - Click "AI Recommendations" tab
-   - See Gemini-powered insights
+   - See conditional rule-based insights
    - Check state-specific advice
 
 5. **Generate Reports**
@@ -495,7 +489,7 @@ CREATE TABLE recommendations (
 
 ---
 
-## 📈 Financial State Behaviors
+## Financial State Behaviors
 
 ### Budgeting Mode
 - Focus: Expense tracking and control
@@ -523,7 +517,7 @@ CREATE TABLE recommendations (
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Database Connection Error
 ```
@@ -533,13 +527,13 @@ Error: connect ECONNREFUSED
 - Check connection details in .env
 - Verify database exists: `SHOW DATABASES;`
 
-### Gemini API Error
+### Recommendation Engine Issue
 ```
-Error: GEMINI_API_KEY not found
+Error: recommendation engine returned empty output
 ```
-- Generate API key from Google AI Studio
-- Add to .env file
-- Restart backend server
+- Check the transaction data being sent to the backend
+- Verify transaction types are normalized correctly
+- Restart backend server if code changes were made
 
 ### CORS Error
 ```
@@ -558,7 +552,7 @@ Error: listen EADDRINUSE: address already in use :::5000
 
 ---
 
-## 📦 Deployment
+## Deployment
 
 ### Backend Deployment (Heroku)
 ```bash
@@ -577,7 +571,7 @@ npm run build
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -587,22 +581,22 @@ npm run build
 
 ---
 
-## 📝 License
+## License
 
 MIT License - Feel free to use this project for personal and commercial use.
 
 ---
 
-## 👨‍💼 Author
+## Author
 
-**Your Name**
-- Lab 14: Personal Finance Management System with AI Recommendations
+**Shehroz Shoukat Ali**
+- Lab 14: Personal Finance Management System with Conditional Recommendations
 - SE-211: Software Design and Architecture
 - BESE-15 Class
 
 ---
 
-## 📞 Support
+## Support
 
 For issues or questions:
 1. Check the troubleshooting section
@@ -612,7 +606,7 @@ For issues or questions:
 
 ---
 
-## 🎓 Learning Resources
+## Learning Resources
 
 ### SOLID Principles
 - [SOLID Principles by Robert Martin](https://en.wikipedia.org/wiki/SOLID)
@@ -625,9 +619,9 @@ For issues or questions:
 - [React Documentation](https://react.dev)
 - [Express.js Guide](https://expressjs.com)
 - [MySQL Documentation](https://dev.mysql.com/doc)
-- [Google Generative AI](https://ai.google.dev)
+- [Rule-based system design](https://refactoring.guru/design-patterns)
 
 ---
 
-**Last Updated:** January 2024
+**Last Updated:** May 2026
 **Version:** 1.0.0
