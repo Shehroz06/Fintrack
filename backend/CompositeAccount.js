@@ -130,7 +130,7 @@ class CompositeAccount extends Account {
 
     display(indent = 0) {
         const prefix = ' '.repeat(indent);
-        let result = `${prefix}📊 Portfolio: ${this.name} (Total: $${this.getBalance().toFixed(2)})\n`;
+        let result = `${prefix}Portfolio: ${this.name} (Total: $${this.getBalance().toFixed(2)})\n`;
 
         this.children.forEach(child => {
             result += child.display(indent + 2) + '\n';

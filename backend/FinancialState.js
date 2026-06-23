@@ -49,13 +49,13 @@ class BudgetingState extends FinancialState {
      */
 
     enter(context) {
-        console.log('📋 Entered BUDGETING MODE');
+        console.log('Entered BUDGETING MODE');
         context.mode = 'budgeting';
         context.focusArea = 'expense-control';
     }
 
     exit(context) {
-        console.log('📋 Exiting BUDGETING MODE');
+        console.log('Exiting BUDGETING MODE');
     }
 
     getRecommendations(context) {
@@ -145,13 +145,13 @@ class SavingsState extends FinancialState {
      */
 
     enter(context) {
-        console.log('💰 Entered SAVINGS MODE');
+        console.log('Entered SAVINGS MODE');
         context.mode = 'savings';
         context.focusArea = 'savings-accumulation';
     }
 
     exit(context) {
-        console.log('💰 Exiting SAVINGS MODE');
+        console.log('Exiting SAVINGS MODE');
     }
 
     getRecommendations(context) {
@@ -173,7 +173,7 @@ class SavingsState extends FinancialState {
             recommendations.push({
                 priority: 'low',
                 category: 'savings',
-                message: `✅ Great job! Your savings rate is ${percent(savingsRate)}%`
+                message: `Great job! Your savings rate is ${percent(savingsRate)}%`
             });
         } else {
             recommendations.push({
@@ -248,13 +248,13 @@ class InvestmentState extends FinancialState {
      */
 
     enter(context) {
-        console.log('📈 Entered INVESTMENT MODE');
+        console.log('Entered INVESTMENT MODE');
         context.mode = 'investment';
         context.focusArea = 'wealth-growth';
     }
 
     exit(context) {
-        console.log('📈 Exiting INVESTMENT MODE');
+        console.log('Exiting INVESTMENT MODE');
     }
 
     getRecommendations(context) {
@@ -282,7 +282,7 @@ class InvestmentState extends FinancialState {
             recommendations.push({
                 priority: 'low',
                 category: 'investment',
-                message: `✅ Good investment rate: ${percent(investmentRate)}%`
+                message: `Good investment rate: ${percent(investmentRate)}%`
             });
         }
 

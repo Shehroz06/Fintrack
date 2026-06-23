@@ -80,13 +80,12 @@ class TransactionService {
             let query = `
                 SELECT t.*, a.name as account_name, a.type as account_type
                 FROM transactions t
-                JOIN accounts a ON t.account_id = a.id
+                LEFT JOIN accounts a ON t.account_id = a.id
                 WHERE t.user_id = ?
             `;
 
             const params = [userId];
 
-            // Apply filters
             if (filters.type) {
                 query += ` AND t.type = ?`;
                 params.push(filters.type);
@@ -103,6 +102,17 @@ class TransactionService {
             }
 
             query += ` ORDER BY t.transaction_date DESC`;
+
+            const limit = Number(filters.limit);
+            const offset = Number(filters.offset);
+            if (Number.isFinite(limit) && limit > 0) {
+                query += ` LIMIT ?`;
+                params.push(limit);
+                if (Number.isFinite(offset) && offset >= 0) {
+                    query += ` OFFSET ?`;
+                    params.push(offset);
+                }
+            }
 
             const results = await this.db.query(query, params);
             return {
@@ -298,8 +308,9 @@ class GoalTrackerService {
             // Calculate progress percentage
             const goals = results.map(goal => ({
                 ...goal,
-                progressPercentage: (goal.current_amount / goal.target_amount * 100).toFixed(2),
-                remainingAmount: (goal.target_amount - goal.current_amount).toFixed(2),
+                current_amount: goal.current_amount || 0,
+                progressPercentage: Math.min(((goal.current_amount || 0) / goal.target_amount * 100), 100).toFixed(2),
+                remainingAmount: Math.max((goal.target_amount - (goal.current_amount || 0)), 0).toFixed(2),
                 daysRemaining: this._calculateDaysRemaining(goal.deadline)
             }));
 

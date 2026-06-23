@@ -70,6 +70,4 @@ function GoalForm({ onSubmit }) {
   );
 }
 
-// ==================== RECOMMENDATION PANEL ====================
-
 export default GoalForm;

@@ -1,8 +1,4 @@
-/**
- * FRONTEND APP.JS - Main React Application
- */
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import Dashboard from './components/Dashboard';
 import TransactionForm from './components/TransactionForm';
@@ -10,177 +6,258 @@ import GoalForm from './components/GoalForm';
 import RecommendationPanel from './components/RecommendationPanel';
 import FinancialStateDisplay from './components/FinancialStateDisplay';
 import ReportChart from './components/ReportChart';
+import AuthForm from './components/AuthForm';
 import API from './services/api';
+import { money } from './utils';
+import { exportTransactionsToCSV } from './utils/csvExport';
+
+const PAGE_SIZE = 15;
+
+function normalizeFinancialState(value) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (['BUDGETING', 'SAVINGS', 'INVESTMENT'].includes(raw)) return raw;
+  if (raw.includes('BUDGET')) return 'BUDGETING';
+  if (raw.includes('SAV')) return 'SAVINGS';
+  if (raw.includes('INVEST')) return 'INVESTMENT';
+  return 'BUDGETING';
+}
 
 function App() {
-  const money = (value) => {
-    const numericValue = Number(value || 0);
-    return Number.isFinite(numericValue) ? numericValue.toFixed(2) : '0.00';
-  };
+  // ---- Auth ----
+  const [isAuthenticated, setIsAuthenticated] = useState(API.isAuthenticated());
+  const [authUser, setAuthUser] = useState(API.getStoredUser());
 
-  const normalizeFinancialState = (value) => {
-    const rawValue = String(value || '').trim().toUpperCase();
-    if (rawValue === 'BUDGETING' || rawValue === 'SAVINGS' || rawValue === 'INVESTMENT') {
-      return rawValue;
-    }
-
-    if (rawValue.includes('BUDGET')) return 'BUDGETING';
-    if (rawValue.includes('SAV')) return 'SAVINGS';
-    if (rawValue.includes('INVEST')) return 'INVESTMENT';
-
-    return 'BUDGETING';
-  };
-
-  const [userId] = useState(1); // Demo user ID
+  // ---- App state ----
   const [activeTab, setActiveTab] = useState('dashboard');
   const [transactions, setTransactions] = useState([]);
   const [goals, setGoals] = useState([]);
   const [recommendations, setRecommendations] = useState(null);
   const [financialState, setFinancialState] = useState('BUDGETING');
-  const [portfolio, setPortfolio] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [notification, setNotification] = useState(null);
 
-  // Fetch data on component mount
+  // ---- Pagination ----
+  const [txPage, setTxPage] = useState(0); // 0-indexed
+
+  // ---- Dark mode ----
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('fintrack_dark') === 'true');
+
+  // ---- Goal progress editing ----
+  const [goalInputs, setGoalInputs] = useState({}); // goalId → string
+
   useEffect(() => {
-    loadAllData();
-  }, [userId]);
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    localStorage.setItem('fintrack_dark', darkMode);
+  }, [darkMode]);
 
-  const loadAllData = async () => {
+  // Listen for 401 events from API service
+  useEffect(() => {
+    const onUnauth = () => { setIsAuthenticated(false); setAuthUser(null); };
+    window.addEventListener('fintrack:unauthorized', onUnauth);
+    return () => window.removeEventListener('fintrack:unauthorized', onUnauth);
+  }, []);
+
+  const showNotification = useCallback((type, message) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 3500);
+  }, []);
+
+  const handleAuthSuccess = useCallback((token, user) => {
+    API.setAuth(token, user);
+    setIsAuthenticated(true);
+    setAuthUser(user);
+  }, []);
+
+  const handleLogout = () => {
+    API.clearAuth();
+    setIsAuthenticated(false);
+    setAuthUser(null);
+    setTransactions([]);
+    setGoals([]);
+    setRecommendations(null);
+    setActiveTab('dashboard');
+  };
+
+  const loadAllData = useCallback(async () => {
     setLoading(true);
     try {
-      // Load transactions
-      const transRes = await API.getTransactions(userId);
-      if (transRes.success) {
-        setTransactions(transRes.transactions);
-      }
-
-      // Load goals
-      const goalsRes = await API.getGoals(userId);
-      if (goalsRes.success) {
-        setGoals(goalsRes.goals);
-      }
-
-      // Load financial state
-      const stateRes = await API.getFinancialState(userId);
-      if (stateRes.currentState) {
-        setFinancialState(normalizeFinancialState(stateRes.currentState));
-      }
-
-      // Load portfolio
-      const portfolioRes = await API.getPortfolio(userId);
-      if (portfolioRes.success) {
-        setPortfolio(portfolioRes.portfolio);
-      }
-
-      // Load recommendations
-      const recRes = await API.generateRecommendations(userId);
-      if (recRes.success) {
-        setRecommendations(recRes);
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
+      const [transRes, goalsRes, stateRes, recRes] = await Promise.all([
+        API.getTransactions(),
+        API.getGoals(),
+        API.getFinancialState(),
+        API.generateRecommendations()
+      ]);
+      if (transRes.success) setTransactions(transRes.transactions);
+      if (goalsRes.success) setGoals(goalsRes.goals);
+      if (stateRes.currentState) setFinancialState(normalizeFinancialState(stateRes.currentState));
+      if (recRes.success) setRecommendations(recRes);
+    } catch {
+      showNotification('error', 'Failed to load data. Is the server running?');
     } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification]);
 
+  useEffect(() => {
+    if (isAuthenticated) loadAllData();
+  }, [isAuthenticated, loadAllData]);
+
+  // ---- Transaction actions ----
   const handleTransactionAdded = async (transaction) => {
     try {
-      const result = await API.addTransaction(userId, transaction);
+      const result = await API.addTransaction(transaction);
       if (result.success) {
-        loadAllData();
+        showNotification('success', 'Transaction added.');
+        setTxPage(0);
+        const [transRes, recRes] = await Promise.all([API.getTransactions(), API.generateRecommendations()]);
+        if (transRes.success) setTransactions(transRes.transactions);
+        if (recRes.success) setRecommendations(recRes);
+      } else {
+        showNotification('error', result.error || 'Failed to add transaction.');
       }
-    } catch (error) {
-      console.error('Error adding transaction:', error);
-    }
+    } catch { showNotification('error', 'Network error.'); }
   };
 
+  const handleTransactionDeleted = async (id) => {
+    try {
+      const result = await API.deleteTransaction(id);
+      if (result.success) {
+        showNotification('success', 'Transaction deleted.');
+        const [transRes, recRes] = await Promise.all([API.getTransactions(), API.generateRecommendations()]);
+        if (transRes.success) setTransactions(transRes.transactions);
+        if (recRes.success) setRecommendations(recRes);
+      } else {
+        showNotification('error', result.error || 'Failed to delete.');
+      }
+    } catch { showNotification('error', 'Network error.'); }
+  };
+
+  // ---- Goal actions ----
   const handleGoalCreated = async (goal) => {
     try {
-      const result = await API.createGoal(userId, goal);
+      const result = await API.createGoal(goal);
       if (result.success) {
-        loadAllData();
+        showNotification('success', 'Goal created!');
+        const goalsRes = await API.getGoals();
+        if (goalsRes.success) setGoals(goalsRes.goals);
+      } else {
+        showNotification('error', result.error || 'Failed to create goal.');
       }
-    } catch (error) {
-      console.error('Error creating goal:', error);
-    }
+    } catch { showNotification('error', 'Network error.'); }
   };
 
-  const handleStateSwitch = async (newState) => {
+  const handleGoalDeleted = async (goalId) => {
     try {
-      const selectedState = normalizeFinancialState(newState);
-      setFinancialState(selectedState);
+      const result = await API.deleteGoal(goalId);
+      if (result.success) {
+        showNotification('success', 'Goal deleted.');
+        const goalsRes = await API.getGoals();
+        if (goalsRes.success) setGoals(goalsRes.goals);
+      } else {
+        showNotification('error', result.error || 'Failed to delete goal.');
+      }
+    } catch { showNotification('error', 'Network error.'); }
+  };
 
-      const result = await API.switchFinancialState(userId, selectedState);
+  const handleGoalProgressUpdate = async (goalId) => {
+    const raw = goalInputs[goalId];
+    const amount = parseFloat(raw);
+    if (!raw || isNaN(amount) || amount < 0) { showNotification('error', 'Enter a valid amount.'); return; }
+    try {
+      const result = await API.updateGoalProgress(goalId, amount);
+      if (result.success) {
+        showNotification('success', 'Goal progress updated!');
+        setGoalInputs(prev => ({ ...prev, [goalId]: '' }));
+        const goalsRes = await API.getGoals();
+        if (goalsRes.success) setGoals(goalsRes.goals);
+      } else {
+        showNotification('error', result.error || 'Failed to update goal.');
+      }
+    } catch { showNotification('error', 'Network error.'); }
+  };
+
+  // ---- Financial mode ----
+  const handleStateSwitch = async (newState) => {
+    const state = normalizeFinancialState(newState);
+    setFinancialState(state);
+    try {
+      const result = await API.switchFinancialState(state);
       if (result.success) {
         setFinancialState(normalizeFinancialState(result.currentState));
-        loadAllData();
+        const recRes = await API.generateRecommendations();
+        if (recRes.success) setRecommendations(recRes);
+      } else {
+        showNotification('error', result.error || 'Failed to switch mode.');
       }
-    } catch (error) {
-      console.error('Error switching state:', error);
-    }
+    } catch { showNotification('error', 'Network error.'); }
   };
+
+  // ---- Pagination ----
+  const pagedTransactions = transactions.slice(txPage * PAGE_SIZE, (txPage + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(transactions.length / PAGE_SIZE);
+
+  // ===================== RENDER =====================
+
+  if (!isAuthenticated) {
+    return <AuthForm onAuthSuccess={handleAuthSuccess} />;
+  }
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>💰 Personal Finance Management System</h1>
-        <p className="subtitle">Smart Rule-Based Financial Planning</p>
+        <div className="header-left">
+          <h1>FinTrack</h1>
+          <p className="subtitle">Personal Finance Management</p>
+        </div>
+        <div className="header-right">
+          {authUser && <span className="user-greeting">Hi, {authUser.name.split(' ')[0]}</span>}
+          <button
+            className="icon-btn"
+            onClick={() => setDarkMode(d => !d)}
+            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label="Toggle dark mode"
+          >
+            {darkMode ? '☀️' : '🌙'}
+          </button>
+          <button className="btn-logout" onClick={handleLogout}>Log out</button>
+        </div>
       </header>
 
       <nav className="app-nav">
-        <button 
-          className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dashboard')}
-        >
-          📊 Dashboard
-        </button>
-        <button 
-          className={`nav-btn ${activeTab === 'transactions' ? 'active' : ''}`}
-          onClick={() => setActiveTab('transactions')}
-        >
-          💳 Transactions
-        </button>
-        <button 
-          className={`nav-btn ${activeTab === 'goals' ? 'active' : ''}`}
-          onClick={() => setActiveTab('goals')}
-        >
-          🎯 Goals
-        </button>
-        <button 
-          className={`nav-btn ${activeTab === 'recommendations' ? 'active' : ''}`}
-          onClick={() => setActiveTab('recommendations')}
-        >
-          ✨ Smart Insights
-        </button>
-        <button 
-          className={`nav-btn ${activeTab === 'reports' ? 'active' : ''}`}
-          onClick={() => setActiveTab('reports')}
-        >
-          📈 Reports
-        </button>
+        {[
+          { id: 'dashboard', label: 'Dashboard' },
+          { id: 'transactions', label: 'Transactions' },
+          { id: 'goals', label: 'Goals' },
+          { id: 'recommendations', label: 'Insights' },
+          { id: 'reports', label: 'Reports' },
+        ].map(({ id, label }) => (
+          <button
+            key={id}
+            className={`nav-btn ${activeTab === id ? 'active' : ''}`}
+            onClick={() => setActiveTab(id)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
+      {notification && (
+        <div className={`notification notification-${notification.type}`} role="alert">
+          {notification.message}
+        </div>
+      )}
+
       <main className="app-main">
-        {loading && <div className="loading">Loading your financial data...</div>}
+        {loading && <div className="loading-bar" />}
 
-        {/* Financial State Display */}
-        <FinancialStateDisplay 
-          currentState={financialState}
-          onStateSwitch={handleStateSwitch}
-        />
+        <FinancialStateDisplay currentState={financialState} onStateSwitch={handleStateSwitch} />
 
-        {/* Dashboard Tab */}
+        {/* DASHBOARD */}
         {activeTab === 'dashboard' && (
-          <Dashboard 
-            transactions={transactions}
-            goals={goals}
-            portfolio={portfolio}
-            financialState={financialState}
-          />
+          <Dashboard transactions={transactions} goals={goals} financialState={financialState} />
         )}
 
-        {/* Transactions Tab */}
+        {/* TRANSACTIONS */}
         {activeTab === 'transactions' && (
           <div className="tab-content">
             <div className="content-grid">
@@ -188,27 +265,54 @@ function App() {
                 <h2>Add Transaction</h2>
                 <TransactionForm onSubmit={handleTransactionAdded} />
               </div>
+
               <div className="section">
-                <h2>Recent Transactions</h2>
-                <div className="transactions-list">
-                  {transactions.slice(0, 10).map((trans, idx) => (
-                    <div key={idx} className="transaction-item">
-                      <span className="trans-date">
-                        {new Date(trans.transaction_date).toLocaleDateString()}
-                      </span>
-                      <span className="trans-desc">{trans.description}</span>
-                      <span className={`trans-amount ${trans.type}`}>
-                        {trans.type === 'expense' ? '-' : '+'} ${money(trans.amount)}
-                      </span>
-                    </div>
-                  ))}
+                <div className="section-header">
+                  <h2>Transactions</h2>
+                  {transactions.length > 0 && (
+                    <button
+                      className="btn-export"
+                      onClick={() => exportTransactionsToCSV(transactions)}
+                      title="Export all transactions to CSV"
+                    >
+                      Export CSV
+                    </button>
+                  )}
                 </div>
+
+                {transactions.length === 0 ? (
+                  <p className="empty-state">No transactions yet. Add your first one!</p>
+                ) : (
+                  <>
+                    <div className="transactions-list">
+                      {pagedTransactions.map((t) => (
+                        <div key={t.id} className="transaction-item">
+                          <span className="trans-date">{new Date(t.transaction_date).toLocaleDateString()}</span>
+                          <span className="trans-cat badge">{t.category}</span>
+                          <span className="trans-desc">{t.description}</span>
+                          <span className={`trans-amount ${t.type}`}>
+                            {t.type === 'expense' ? '-' : '+'} ${money(t.amount)}
+                          </span>
+                          <button className="btn-delete" onClick={() => handleTransactionDeleted(t.id)} title="Delete">Remove</button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {totalPages > 1 && (
+                      <div className="pagination">
+                        <button className="btn-page" onClick={() => setTxPage(p => p - 1)} disabled={txPage === 0}>Prev</button>
+                        <span className="page-info">Page {txPage + 1} of {totalPages}</span>
+                        <button className="btn-page" onClick={() => setTxPage(p => p + 1)} disabled={txPage >= totalPages - 1}>Next</button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Goals Tab */}
+        {/* GOALS */}
         {activeTab === 'goals' && (
           <div className="tab-content">
             <div className="content-grid">
@@ -216,36 +320,64 @@ function App() {
                 <h2>Create New Goal</h2>
                 <GoalForm onSubmit={handleGoalCreated} />
               </div>
+
               <div className="section">
                 <h2>Your Goals</h2>
-                <div className="goals-list">
-                  {goals.map((goal, idx) => (
-                    <div key={idx} className="goal-item">
-                      <h3>{goal.name}</h3>
-                      <div className="goal-progress">
-                        <div 
-                          className="progress-bar"
-                          style={{ width: `${goal.progressPercentage}%` }}
-                        ></div>
+                {goals.length === 0 ? (
+                  <p className="empty-state">No goals yet. Create your first savings goal!</p>
+                ) : (
+                  <div className="goals-list">
+                    {goals.map((goal) => (
+                      <div key={goal.id} className="goal-item">
+                        <div className="goal-header">
+                          <h3>{goal.name}</h3>
+                          <button className="btn-delete" onClick={() => handleGoalDeleted(goal.id)} title="Delete">Remove</button>
+                        </div>
+                        <div className="goal-progress">
+                          <div className="progress-bar" style={{ width: `${goal.progressPercentage}%` }} />
+                        </div>
+                        <p>${money(goal.current_amount)} / ${money(goal.target_amount)} ({goal.progressPercentage}%)</p>
+                        <p className="goal-meta">
+                          <span className="goal-status">{goal.status}</span>
+                          {goal.daysRemaining > 0 && <span className="goal-days"> · {goal.daysRemaining}d left</span>}
+                        </p>
+
+                        {goal.status === 'active' && (
+                          <div className="goal-update-row">
+                            <input
+                              type="number"
+                              className="goal-update-input"
+                              placeholder="Set saved amount"
+                              min="0"
+                              step="0.01"
+                              value={goalInputs[goal.id] || ''}
+                              onChange={e => setGoalInputs(prev => ({ ...prev, [goal.id]: e.target.value }))}
+                            />
+                            <button
+                              className="btn btn-sm"
+                              onClick={() => handleGoalProgressUpdate(goal.id)}
+                            >
+                              Update
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p>${money(goal.current_amount)} / ${money(goal.target_amount)}</p>
-                      <p className="goal-status">{goal.status}</p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Recommendations Tab */}
+        {/* INSIGHTS */}
         {activeTab === 'recommendations' && (
           <div className="tab-content">
-            <RecommendationPanel recommendations={recommendations} />
+            <RecommendationPanel recommendations={recommendations} loading={loading} />
           </div>
         )}
 
-        {/* Reports Tab */}
+        {/* REPORTS */}
         {activeTab === 'reports' && (
           <div className="tab-content">
             <ReportChart transactions={transactions} goals={goals} />
@@ -254,7 +386,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Personal Finance Management System © 2024 | Powered by Smart Rules</p>
+        <p>FinTrack — Personal Finance Management</p>
       </footer>
     </div>
   );

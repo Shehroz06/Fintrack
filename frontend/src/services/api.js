@@ -1,260 +1,161 @@
-/**
- * FRONTEND API SERVICE
- * Handles all communication with the backend
- */
-
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
+const TOKEN_KEY = 'fintrack_token';
+const USER_KEY = 'fintrack_user';
+
 class APIService {
+  // ==================== TOKEN MANAGEMENT ====================
+
+  getToken() { return localStorage.getItem(TOKEN_KEY); }
+
+  setAuth(token, user) {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  }
+
+  clearAuth() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }
+
+  getStoredUser() {
+    try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch { return null; }
+  }
+
+  isAuthenticated() { return !!this.getToken(); }
+
+  _headers(extra = {}) {
+    const token = this.getToken();
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra
+    };
+  }
+
+  async _fetch(url, options = {}) {
+    const res = await fetch(url, { ...options, headers: this._headers(options.headers) });
+    if (res.status === 401) {
+      this.clearAuth();
+      window.dispatchEvent(new Event('fintrack:unauthorized'));
+    }
+    return res.json();
+  }
+
+  // ==================== AUTH ====================
+
+  async register(name, email, password) {
+    return this._fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password })
+    });
+  }
+
+  async login(email, password) {
+    return this._fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+  }
+
   // ==================== TRANSACTIONS ====================
-  
-  async addTransaction(userId, transaction) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          ...transaction
-        })
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Error adding transaction:', error);
-      throw error;
-    }
+
+  async addTransaction(transaction) {
+    return this._fetch(`${API_BASE_URL}/transactions`, {
+      method: 'POST',
+      body: JSON.stringify(transaction)
+    });
   }
 
-  async getTransactions(userId, filters = {}) {
-    try {
-      let url = `${API_BASE_URL}/transactions/${userId}`;
-      const params = new URLSearchParams(filters);
-      if (params.toString()) {
-        url += `?${params.toString()}`;
-      }
-
-      const response = await fetch(url);
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      throw error;
-    }
+  async getTransactions(filters = {}) {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') params.set(k, v); });
+    const qs = params.toString();
+    return this._fetch(`${API_BASE_URL}/transactions${qs ? `?${qs}` : ''}`);
   }
 
-  async getCategoryBreakdown(userId, month = null) {
-    try {
-      let url = `${API_BASE_URL}/transactions/category-breakdown/${userId}`;
-      if (month) {
-        url += `?month=${month}`;
-      }
-
-      const response = await fetch(url);
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching category breakdown:', error);
-      throw error;
-    }
+  async getCategoryBreakdown(month = null) {
+    const qs = month ? `?month=${month}` : '';
+    return this._fetch(`${API_BASE_URL}/transactions/category-breakdown${qs}`);
   }
 
-  async getMonthlySummary(userId, month) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/transactions/monthly-summary/${userId}/${month}`
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching monthly summary:', error);
-      throw error;
-    }
+  async getMonthlySummary(month) {
+    return this._fetch(`${API_BASE_URL}/transactions/monthly-summary/${month}`);
   }
 
-  async deleteTransaction(userId, transactionId) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/transactions/${transactionId}/${userId}`,
-        { method: 'DELETE' }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error deleting transaction:', error);
-      throw error;
-    }
+  async deleteTransaction(transactionId) {
+    return this._fetch(`${API_BASE_URL}/transactions/${transactionId}`, { method: 'DELETE' });
   }
 
   // ==================== GOALS ====================
 
-  async createGoal(userId, goal) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/goals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          ...goal
-        })
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Error creating goal:', error);
-      throw error;
-    }
+  async createGoal(goal) {
+    return this._fetch(`${API_BASE_URL}/goals`, {
+      method: 'POST',
+      body: JSON.stringify(goal)
+    });
   }
 
-  async getGoals(userId) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/goals/${userId}`);
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching goals:', error);
-      throw error;
-    }
+  async getGoals() {
+    return this._fetch(`${API_BASE_URL}/goals`);
   }
 
-  async updateGoalProgress(userId, goalId, currentAmount) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/goals/${goalId}/${userId}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ currentAmount })
-        }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error updating goal:', error);
-      throw error;
-    }
+  async updateGoalProgress(goalId, currentAmount) {
+    return this._fetch(`${API_BASE_URL}/goals/${goalId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ currentAmount })
+    });
   }
 
-  async deleteGoal(userId, goalId) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/goals/${goalId}/${userId}`,
-        { method: 'DELETE' }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error deleting goal:', error);
-      throw error;
-    }
+  async deleteGoal(goalId) {
+    return this._fetch(`${API_BASE_URL}/goals/${goalId}`, { method: 'DELETE' });
   }
 
   // ==================== FINANCIAL STATE ====================
 
-  async switchFinancialState(userId, state) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/financial-state/switch`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, state })
-        }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error switching financial state:', error);
-      throw error;
-    }
+  async switchFinancialState(state) {
+    return this._fetch(`${API_BASE_URL}/financial-state/switch`, {
+      method: 'POST',
+      body: JSON.stringify({ state })
+    });
   }
 
-  async getFinancialState(userId) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/financial-state/${userId}`
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching financial state:', error);
-      throw error;
-    }
+  async getFinancialState() {
+    return this._fetch(`${API_BASE_URL}/financial-state`);
   }
 
   // ==================== RECOMMENDATIONS ====================
 
-  async generateRecommendations(userId) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/recommendations/generate`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId })
-        }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error generating recommendations:', error);
-      throw error;
-    }
+  async generateRecommendations() {
+    return this._fetch(`${API_BASE_URL}/recommendations/generate`, { method: 'POST', body: JSON.stringify({}) });
   }
 
   // ==================== PORTFOLIO ====================
 
-  async addAccountToPortfolio(userId, accountName, accountType, initialBalance = 0) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/portfolio/accounts`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            accountName,
-            accountType,
-            initialBalance
-          })
-        }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error adding account:', error);
-      throw error;
-    }
+  async addAccount(accountName, accountType, initialBalance = 0) {
+    return this._fetch(`${API_BASE_URL}/portfolio/accounts`, {
+      method: 'POST',
+      body: JSON.stringify({ accountName, accountType, initialBalance })
+    });
   }
 
-  async getPortfolio(userId) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/portfolio/${userId}`
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching portfolio:', error);
-      throw error;
-    }
+  async getPortfolio() {
+    return this._fetch(`${API_BASE_URL}/portfolio`);
   }
 
   // ==================== BUDGETING STRATEGY ====================
 
   async calculateBudget(strategy, income) {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/budgeting-strategy`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strategy, income })
-        }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error('Error calculating budget:', error);
-      throw error;
-    }
+    return this._fetch(`${API_BASE_URL}/budgeting-strategy`, {
+      method: 'POST',
+      body: JSON.stringify({ strategy, income })
+    });
   }
 
-  // ==================== HEALTH CHECK ====================
+  // ==================== HEALTH ====================
 
   async healthCheck() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/health`);
-      return await response.json();
-    } catch (error) {
-      console.error('Error checking API health:', error);
-      throw error;
-    }
+    return this._fetch(`${API_BASE_URL}/health`);
   }
 }
 
