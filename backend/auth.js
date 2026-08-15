@@ -6,7 +6,7 @@ const DatabaseSingleton = require('./DatabaseSingleton');
 const router = express.Router();
 const db = DatabaseSingleton.getInstance();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fintrack-dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 router.post('/register', async (req, res) => {

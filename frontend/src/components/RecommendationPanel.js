@@ -19,10 +19,10 @@ function RecommendationPanel({ recommendations, loading }) {
   } = recommendations;
 
   const metricCards = [
-    { label: 'Income', value: `$${money(userMetrics.totalIncome)}` },
-    { label: 'Expenses', value: `$${money(userMetrics.totalExpenses)}` },
+    { label: 'Income', value: money(userMetrics.totalIncome) },
+    { label: 'Expenses', value: money(userMetrics.totalExpenses) },
     { label: 'Savings Rate', value: `${percent(userMetrics.savingsRate)}%` },
-    { label: 'Investments', value: `$${money(userMetrics.investmentAmount)}` },
+    { label: 'Investments', value: money(userMetrics.investmentAmount) },
   ];
 
   return (

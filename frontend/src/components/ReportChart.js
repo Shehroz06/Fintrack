@@ -3,17 +3,17 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell
 } from 'recharts';
-import { money } from '../utils';
+import { money, monthKey } from '../utils';
 
 const CHART_COLORS = ['#667eea', '#48bb78', '#f6ad55', '#f56565', '#764ba2', '#4299e1', '#ed8936', '#38b2ac'];
 
-const CURRENCY_FORMATTER = (value) => `$${Number(value).toFixed(0)}`;
+const CURRENCY_FORMATTER = (value) => `Rs. ${Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
 function buildMonthlyData(transactions) {
   const map = {};
   transactions.forEach(t => {
-    const month = String(t.transaction_date || '').slice(0, 7); // YYYY-MM
-    if (!month) return;
+    if (!t.transaction_date) return;
+    const month = monthKey(t.transaction_date); // YYYY-MM, in local time
     if (!map[month]) map[month] = { month, income: 0, expenses: 0, savings: 0 };
     if (t.type === 'income') map[month].income += t.amount;
     if (t.type === 'expense') map[month].expenses += t.amount;
@@ -39,7 +39,7 @@ const CustomTooltipBar = ({ active, payload, label }) => {
       <p className="tooltip-label">{label}</p>
       {payload.map(p => (
         <p key={p.dataKey} style={{ color: p.color }}>
-          {p.name}: ${money(p.value)}
+          {p.name}: {money(p.value)}
         </p>
       ))}
     </div>
@@ -51,15 +51,15 @@ const CustomTooltipPie = ({ active, payload }) => {
   return (
     <div className="chart-tooltip">
       <p style={{ color: payload[0].payload.fill }}>
-        {payload[0].name}: ${money(payload[0].value)}
+        {payload[0].name}: {money(payload[0].value)}
       </p>
     </div>
   );
 };
 
-function ReportChart({ transactions, goals }) {
+function ReportChart({ transactions, periodTransactions, periodLabel, goals }) {
   const monthlyData = useMemo(() => buildMonthlyData(transactions), [transactions]);
-  const categoryData = useMemo(() => buildCategoryData(transactions), [transactions]);
+  const categoryData = useMemo(() => buildCategoryData(periodTransactions), [periodTransactions]);
 
   const totalExpenses = categoryData.reduce((s, c) => s + c.value, 0);
 
@@ -87,9 +87,9 @@ function ReportChart({ transactions, goals }) {
       </div>
 
       <div className="section">
-        <h2>Spending by Category</h2>
+        <h2>Spending by Category — {periodLabel}</h2>
         {categoryData.length === 0 ? (
-          <p className="empty-state">No expense transactions yet.</p>
+          <p className="empty-state">No expense transactions in this period.</p>
         ) : (
           <div className="pie-row">
             <ResponsiveContainer width="50%" height={260}>
@@ -117,7 +117,7 @@ function ReportChart({ transactions, goals }) {
                 <div key={item.name} className="pie-legend-item">
                   <span className="pie-dot" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
                   <span className="pie-name">{item.name}</span>
-                  <span className="pie-amount">${money(item.value)}</span>
+                  <span className="pie-amount">{money(item.value)}</span>
                   <span className="pie-pct">
                     {totalExpenses > 0 ? ((item.value / totalExpenses) * 100).toFixed(1) : 0}%
                   </span>
@@ -145,7 +145,7 @@ function ReportChart({ transactions, goals }) {
                     />
                   </div>
                   <span className="progress-text">
-                    {goal.progressPercentage}% — ${money(goal.current_amount)} of ${money(goal.target_amount)}
+                    {goal.progressPercentage}% — {money(goal.current_amount)} of {money(goal.target_amount)}
                   </span>
                 </div>
                 {goal.daysRemaining > 0 && (

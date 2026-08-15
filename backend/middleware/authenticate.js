@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fintrack-dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 module.exports = function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;

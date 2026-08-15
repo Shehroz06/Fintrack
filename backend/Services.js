@@ -73,6 +73,34 @@ class TransactionService {
     }
 
     /**
+     * Update an existing transaction. Scoped to userId so one user can never
+     * edit another user's transaction, even by guessing an id.
+     */
+    async updateTransaction(transactionId, userId, transaction) {
+        try {
+            const { type, amount, category, description, transactionDate } = transaction;
+            const normalizedType = normalizeTransactionType(type);
+            const normalizedAmount = normalizeAmount(amount);
+
+            const result = await this.db.query(
+                `UPDATE transactions
+                 SET type = ?, amount = ?, category = ?, description = ?, transaction_date = ?
+                 WHERE id = ? AND user_id = ?`,
+                [normalizedType, normalizedAmount, category, description, transactionDate, transactionId, userId]
+            );
+
+            if (result.affectedRows === 0) {
+                return { success: false, error: 'Transaction not found.' };
+            }
+
+            return { success: true, message: 'Transaction updated successfully' };
+        } catch (error) {
+            console.error('Error updating transaction:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
      * Get all transactions for a user
      */
     async getUserTransactions(userId, filters = {}) {
@@ -396,7 +424,228 @@ class GoalTrackerService {
     }
 }
 
+/**
+ * mysql2 returns DATE columns as JS Date objects anchored to local midnight
+ * (not UTC midnight), so all date math here must use local getters/setters —
+ * mixing in UTC ones would silently shift the calendar day.
+ */
+function formatDateForSQL(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Advance a date by one interval. Monthly steps clamp to the target month's
+ * length (e.g. Jan 31 -> Feb 28/29, not Mar 3 like a naive setMonth() would
+ * produce).
+ */
+function addInterval(date, frequency) {
+    const next = new Date(date);
+    next.setHours(0, 0, 0, 0);
+
+    if (frequency === 'daily') {
+        next.setDate(next.getDate() + 1);
+        return next;
+    }
+
+    const originalDay = next.getDate();
+    next.setDate(1);
+    next.setMonth(next.getMonth() + 1);
+    const daysInTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    next.setDate(Math.min(originalDay, daysInTargetMonth));
+    return next;
+}
+
+/**
+ * RECURRING TRANSACTION SERVICE
+ * Lets a user schedule a transaction that repeats daily or monthly, and
+ * materializes due occurrences into `transactions` as real time passes
+ * (there is no background worker in this app, so this runs lazily whenever
+ * a user's transactions are fetched — see processDue()).
+ */
+class RecurringTransactionService {
+    constructor() {
+        this.db = DatabaseSingleton.getInstance();
+    }
+
+    async createRule(userId, accountId, rule) {
+        try {
+            const { type, amount, category, description, frequency, startDate } = rule;
+            const normalizedType = normalizeTransactionType(type);
+            const normalizedAmount = normalizeAmount(amount);
+
+            const result = await this.db.query(
+                `INSERT INTO recurring_transactions
+                 (user_id, account_id, type, amount, category, description, frequency, next_run_date)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [userId, accountId, normalizedType, normalizedAmount, category, description, frequency, startDate]
+            );
+
+            return { success: true, ruleId: result.insertId, message: 'Recurring transaction scheduled' };
+        } catch (error) {
+            console.error('Error creating recurring rule:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getUserRules(userId) {
+        try {
+            const results = await this.db.query(
+                `SELECT * FROM recurring_transactions WHERE user_id = ? AND active = 1 ORDER BY next_run_date ASC`,
+                [userId]
+            );
+            return { success: true, rules: results.map(normalizeTransactionRow) };
+        } catch (error) {
+            console.error('Error fetching recurring rules:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async deleteRule(ruleId, userId) {
+        try {
+            await this.db.query(
+                `DELETE FROM recurring_transactions WHERE id = ? AND user_id = ?`,
+                [ruleId, userId]
+            );
+            return { success: true, message: 'Recurring transaction cancelled' };
+        } catch (error) {
+            console.error('Error deleting recurring rule:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Materialize any occurrences due as of today. Catches up on missed
+     * periods (e.g. the app wasn't opened for 2 months) rather than
+     * skipping them, capped so a stale rule can't loop unboundedly.
+     */
+    async processDue(userId) {
+        const MAX_OCCURRENCES_PER_RULE = 366;
+
+        try {
+            const dueRules = await this.db.query(
+                `SELECT * FROM recurring_transactions
+                 WHERE user_id = ? AND active = 1 AND next_run_date <= CURDATE()`,
+                [userId]
+            );
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            for (const rule of dueRules) {
+                let nextRun = new Date(rule.next_run_date);
+                nextRun.setHours(0, 0, 0, 0);
+                let occurrences = 0;
+
+                while (nextRun <= today && occurrences < MAX_OCCURRENCES_PER_RULE) {
+                    await this.db.query(
+                        `INSERT INTO transactions
+                         (user_id, account_id, type, amount, category, description, transaction_date)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [userId, rule.account_id, rule.type, rule.amount, rule.category, rule.description, formatDateForSQL(nextRun)]
+                    );
+                    nextRun = addInterval(nextRun, rule.frequency);
+                    occurrences += 1;
+                }
+
+                await this.db.query(
+                    `UPDATE recurring_transactions SET next_run_date = ? WHERE id = ?`,
+                    [formatDateForSQL(nextRun), rule.id]
+                );
+            }
+
+            return { success: true, processedRules: dueRules.length };
+        } catch (error) {
+            console.error('Error processing recurring transactions:', error);
+            return { success: false, error: error.message };
+        }
+    }
+}
+
+/**
+ * Pure calculation, kept separate from the DB-touching service so it's
+ * trivial to unit test and reuse (e.g. if per-category budgets are added later).
+ */
+function calculateBudgetUsage(budgetAmount, spent) {
+    const amount = normalizeAmount(budgetAmount);
+    const spentAmount = normalizeAmount(spent);
+    const remaining = amount - spentAmount;
+    const percentageUsed = amount > 0 ? (spentAmount / amount) * 100 : 0;
+
+    let status = 'healthy';
+    if (percentageUsed >= 100) status = 'exceeded';
+    else if (percentageUsed >= 80) status = 'near-limit';
+
+    return {
+        amount,
+        spent: spentAmount,
+        remaining,
+        percentageUsed: Math.round(percentageUsed * 10) / 10,
+        overBudgetAmount: remaining < 0 ? Math.abs(remaining) : 0,
+        status
+    };
+}
+
+/**
+ * MONTHLY BUDGET SERVICE
+ * One overall budget amount per user per calendar month (not per-category —
+ * kept simple per the current scope). "Spent" is summed from expense
+ * transactions in that month, so it always reflects real transaction data.
+ */
+class BudgetService {
+    constructor() {
+        this.db = DatabaseSingleton.getInstance();
+    }
+
+    async setBudget(userId, month, amount) {
+        try {
+            await this.db.query(
+                `INSERT INTO budgets (user_id, month, amount)
+                 VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE amount = ?`,
+                [userId, month, amount, amount]
+            );
+            return { success: true };
+        } catch (error) {
+            console.error('Error setting budget:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getBudgetSummary(userId, month) {
+        try {
+            const [budgetRows, spentRows] = await Promise.all([
+                this.db.query('SELECT amount FROM budgets WHERE user_id = ? AND month = ?', [userId, month]),
+                this.db.query(
+                    `SELECT COALESCE(SUM(amount), 0) AS spent
+                     FROM transactions
+                     WHERE user_id = ? AND type = 'expense' AND DATE_FORMAT(transaction_date, '%Y-%m') = ?`,
+                    [userId, month]
+                )
+            ]);
+
+            const budgetAmount = budgetRows.length > 0 ? budgetRows[0].amount : 0;
+            const spent = spentRows[0]?.spent || 0;
+
+            return {
+                success: true,
+                month,
+                hasBudget: budgetRows.length > 0,
+                ...calculateBudgetUsage(budgetAmount, spent)
+            };
+        } catch (error) {
+            console.error('Error getting budget summary:', error);
+            return { success: false, error: error.message };
+        }
+    }
+}
+
 module.exports = {
     TransactionService,
-    GoalTrackerService
+    GoalTrackerService,
+    RecurringTransactionService,
+    BudgetService,
+    calculateBudgetUsage
 };

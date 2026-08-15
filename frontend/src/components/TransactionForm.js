@@ -1,4 +1,5 @@
 import React from 'react';
+import { todayLocalISODate } from '../utils';
 
 const EXPENSE_CATEGORIES = [
   'food', 'transportation', 'utilities', 'entertainment',
@@ -20,14 +21,33 @@ function categoriesForType(type) {
 
 const defaultCategory = (type) => categoriesForType(type)[0];
 
-function TransactionForm({ onSubmit }) {
-  const [formData, setFormData] = React.useState({
-    type: 'expense',
-    amount: '',
-    category: 'food',
-    description: '',
-    transactionDate: new Date().toISOString().split('T')[0]
-  });
+const emptyForm = () => ({
+  type: 'expense',
+  amount: '',
+  category: 'food',
+  description: '',
+  transactionDate: todayLocalISODate(),
+  repeat: 'none'
+});
+
+function TransactionForm({ onSubmit, editingTransaction, onCancelEdit }) {
+  const [formData, setFormData] = React.useState(emptyForm());
+  const isEditing = Boolean(editingTransaction);
+
+  React.useEffect(() => {
+    if (editingTransaction) {
+      setFormData({
+        type: editingTransaction.type,
+        amount: editingTransaction.amount,
+        category: editingTransaction.category,
+        description: editingTransaction.description,
+        transactionDate: String(editingTransaction.transaction_date).slice(0, 10),
+        repeat: 'none'
+      });
+    } else {
+      setFormData(emptyForm());
+    }
+  }, [editingTransaction]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -36,7 +56,7 @@ function TransactionForm({ onSubmit }) {
         ...prev,
         [name]: name === 'amount' ? parseFloat(value) || '' : value
       };
-      if (name === 'type') {
+      if (name === 'type' && !isEditing) {
         updated.category = defaultCategory(value);
       }
       return updated;
@@ -47,14 +67,13 @@ function TransactionForm({ onSubmit }) {
     e.preventDefault();
     if (!formData.amount || formData.amount <= 0) return;
     if (!formData.description.trim()) return;
-    onSubmit(formData);
-    setFormData({
-      type: 'expense',
-      amount: '',
-      category: 'food',
-      description: '',
-      transactionDate: new Date().toISOString().split('T')[0]
-    });
+    if (!formData.category.trim()) return;
+
+    onSubmit({ ...formData, category: formData.category.trim().toLowerCase() }, isEditing ? editingTransaction.id : null);
+
+    if (!isEditing) {
+      setFormData(emptyForm());
+    }
   };
 
   const categories = categoriesForType(formData.type);
@@ -102,17 +121,24 @@ function TransactionForm({ onSubmit }) {
 
       <div className="form-group">
         <label htmlFor="tx-category">Category</label>
-        <select id="tx-category" name="category" value={formData.category} onChange={handleChange}>
-          {categories.map(cat => (
-            <option key={cat} value={cat}>
-              {cat.charAt(0).toUpperCase() + cat.slice(1)}
-            </option>
-          ))}
-        </select>
+        <input
+          id="tx-category"
+          type="text"
+          name="category"
+          list="tx-category-options"
+          value={formData.category}
+          onChange={handleChange}
+          placeholder="Pick a suggestion or type your own"
+          maxLength={100}
+          required
+        />
+        <datalist id="tx-category-options">
+          {categories.map(cat => <option key={cat} value={cat} />)}
+        </datalist>
       </div>
 
       <div className="form-group">
-        <label htmlFor="tx-date">Date</label>
+        <label htmlFor="tx-date">{formData.repeat === 'none' ? 'Date' : 'Start Date'}</label>
         <input
           id="tx-date"
           type="date"
@@ -122,7 +148,25 @@ function TransactionForm({ onSubmit }) {
         />
       </div>
 
-      <button type="submit" className="btn btn-primary">Add Transaction</button>
+      {!isEditing && (
+        <div className="form-group">
+          <label htmlFor="tx-repeat">Repeat</label>
+          <select id="tx-repeat" name="repeat" value={formData.repeat} onChange={handleChange}>
+            <option value="none">One-time</option>
+            <option value="daily">Daily</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+      )}
+
+      <div className="form-actions">
+        <button type="submit" className="btn btn-primary">
+          {isEditing ? 'Save Changes' : formData.repeat === 'none' ? 'Add Transaction' : 'Schedule Recurring Transaction'}
+        </button>
+        {isEditing && (
+          <button type="button" className="btn btn-secondary" onClick={onCancelEdit}>Cancel</button>
+        )}
+      </div>
     </form>
   );
 }

@@ -4,12 +4,16 @@ require('dotenv').config();
 
 const DatabaseSingleton = require('./DatabaseSingleton');
 const RecommendationEngine = require('./RecommendationEngine');
-const { TransactionService, GoalTrackerService } = require('./Services');
+const { TransactionService, GoalTrackerService, RecurringTransactionService, BudgetService } = require('./Services');
 const { FinancialStateManager, BudgetingState, SavingsState, InvestmentState } = require('./FinancialState');
-const { BudgetPlanner, ZeroBasedBudgetingStrategy, FiftyThirtyTwentyStrategy } = require('./BudgetingStrategy');
-const { PortfolioManager, SimpleAccount } = require('./CompositeAccount');
 const authRouter = require('./auth');
 const authenticate = require('./middleware/authenticate');
+const authLimiter = require('./middleware/rateLimiter');
+
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET is not set. Refusing to start with an insecure default — set it in backend/.env.');
+  process.exit(1);
+}
 
 const app = express();
 const db = DatabaseSingleton.getInstance();
@@ -23,21 +27,21 @@ app.use(express.urlencoded({ extended: true }));
 
 const transactionService = new TransactionService();
 const goalTrackerService = new GoalTrackerService();
+const recurringTransactionService = new RecurringTransactionService();
+const budgetService = new BudgetService();
 const recommendationEngine = new RecommendationEngine();
-
-// In-memory composite account store (stateless per-request; accounts persisted in DB)
-const portfolioManagers = new Map();
-
-function getOrCreatePortfolio(userId) {
-  if (!portfolioManagers.has(userId)) {
-    portfolioManagers.set(userId, new PortfolioManager());
-  }
-  return portfolioManagers.get(userId);
-}
 
 // ==================== PUBLIC ROUTES ====================
 
-app.use('/api/auth', authRouter);
+app.get('/', (req, res) => {
+  res.json({
+    name: 'FinTrack API',
+    status: 'running',
+    health: '/api/health'
+  });
+});
+
+app.use('/api/auth', authLimiter, authRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
@@ -92,6 +96,7 @@ app.post('/api/transactions', async (req, res) => {
 app.get('/api/transactions', async (req, res) => {
   try {
     const userId = req.user.userId;
+    await recurringTransactionService.processDue(userId);
     const { type, category, startDate, endDate, limit, offset } = req.query;
     const result = await transactionService.getUserTransactions(userId, {
       type, category, startDate, endDate,
@@ -126,11 +131,126 @@ app.get('/api/transactions/monthly-summary/:month', async (req, res) => {
   }
 });
 
+app.put('/api/transactions/:id', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id } = req.params;
+    const { type, amount, category, description, transactionDate } = req.body;
+
+    const normalizedType = String(type || '').trim().toLowerCase();
+    if (!['income', 'expense', 'investment', 'savings'].includes(normalizedType)) {
+      return res.status(400).json({ success: false, error: 'Invalid transaction type.' });
+    }
+
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
+    }
+
+    const desc = String(description || '').trim();
+    if (!desc) {
+      return res.status(400).json({ success: false, error: 'Description is required.' });
+    }
+
+    if (!transactionDate) {
+      return res.status(400).json({ success: false, error: 'Date is required.' });
+    }
+
+    const result = await transactionService.updateTransaction(id, userId, {
+      type: normalizedType,
+      amount: numAmount,
+      category: category || 'other',
+      description: desc.slice(0, 255),
+      transactionDate
+    });
+
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const userId = req.user.userId;
     const { id } = req.params;
     const result = await transactionService.deleteTransaction(id, userId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ---------- RECURRING TRANSACTIONS ----------
+
+app.post('/api/recurring', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { type, amount, category, description, frequency, startDate } = req.body;
+
+    const normalizedType = String(type || '').trim().toLowerCase();
+    if (!['income', 'expense', 'investment', 'savings'].includes(normalizedType)) {
+      return res.status(400).json({ success: false, error: 'Invalid transaction type.' });
+    }
+
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
+    }
+
+    const desc = String(description || '').trim();
+    if (!desc) {
+      return res.status(400).json({ success: false, error: 'Description is required.' });
+    }
+
+    const normalizedFrequency = String(frequency || '').trim().toLowerCase();
+    if (!['daily', 'monthly'].includes(normalizedFrequency)) {
+      return res.status(400).json({ success: false, error: 'Frequency must be daily or monthly.' });
+    }
+
+    const accounts = await db.query('SELECT id FROM accounts WHERE user_id = ? LIMIT 1', [userId]);
+    const accountId = accounts.length > 0 ? accounts[0].id : null;
+
+    const resolvedCategory = category || await recommendationEngine.categorizeTransaction(desc);
+
+    const result = await recurringTransactionService.createRule(userId, accountId, {
+      type: normalizedType,
+      amount: numAmount,
+      category: resolvedCategory,
+      description: desc.slice(0, 255),
+      frequency: normalizedFrequency,
+      startDate: startDate || new Date().toISOString().split('T')[0]
+    });
+
+    if (result.success) {
+      await recurringTransactionService.processDue(userId);
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/recurring', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await recurringTransactionService.getUserRules(userId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/recurring/:id', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id } = req.params;
+    const result = await recurringTransactionService.deleteRule(id, userId);
     res.json(result);
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -367,32 +487,47 @@ app.get('/api/portfolio', async (req, res) => {
   }
 });
 
-// ---------- BUDGETING STRATEGY ----------
+// ---------- MONTHLY BUDGET ----------
 
-app.post('/api/budgeting-strategy', (req, res) => {
+app.post('/api/budget', async (req, res) => {
   try {
-    const { strategy, income } = req.body;
-    const numIncome = Number(income);
-    if (!Number.isFinite(numIncome) || numIncome <= 0) {
-      return res.status(400).json({ success: false, error: 'Income must be a positive number.' });
+    const userId = req.user.userId;
+    const { amount, month } = req.body;
+
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Budget amount must be a positive number.' });
     }
 
-    let budgetStrategy;
-    if (strategy === 'zero-based') {
-      budgetStrategy = new ZeroBasedBudgetingStrategy();
-    } else if (strategy === 'fifty-thirty-twenty') {
-      budgetStrategy = new FiftyThirtyTwentyStrategy();
-    } else {
-      return res.status(400).json({ success: false, error: 'Strategy must be zero-based or fifty-thirty-twenty.' });
+    const targetMonth = /^\d{4}-\d{2}$/.test(month) ? month : currentMonthKey();
+
+    const result = await budgetService.setBudget(userId, targetMonth, numAmount);
+    if (!result.success) {
+      return res.status(500).json(result);
     }
 
-    const planner = new BudgetPlanner(budgetStrategy);
-    const budget = planner.getBudget(numIncome);
-    res.json({ success: true, budget, strategy: budget.strategy });
+    const summary = await budgetService.getBudgetSummary(userId, targetMonth);
+    res.json(summary);
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+app.get('/api/budget', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const month = /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : currentMonthKey();
+    const result = await budgetService.getBudgetSummary(userId, month);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
 
 // ==================== START SERVER ====================
 
@@ -410,6 +545,10 @@ async function startServer() {
   }
 }
 
-startServer();
+// Only auto-start when run directly (`node server.js` / `npm start`).
+// When required by tests (e.g. via supertest), the caller controls startup.
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;

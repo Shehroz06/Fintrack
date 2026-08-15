@@ -1,7 +1,7 @@
 import React from 'react';
-import { money, percent } from '../utils';
+import { money, monthKey } from '../utils';
 
-function Dashboard({ transactions, goals, financialState }) {
+function Dashboard({ transactions, financialState }) {
   const totalIncome = transactions
     .filter(t => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
@@ -10,21 +10,18 @@ function Dashboard({ transactions, goals, financialState }) {
     .filter(t => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalInvested = transactions
-    .filter(t => t.type === 'investment')
+  const currentMonthKey = monthKey(new Date());
+  const currentMonthExpenses = transactions
+    .filter(t => t.type === 'expense' && monthKey(t.transaction_date) === currentMonthKey)
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const netSavings = totalIncome - totalExpenses;
-  const savingsRate = totalIncome > 0 ? (netSavings / totalIncome) * 100 : 0;
-  const activeGoals = goals ? goals.filter(g => g.status === 'active').length : 0;
+  const currentBalance = totalIncome - totalExpenses;
 
   const cards = [
-    { label: 'Total Income', value: `$${money(totalIncome)}`, cls: 'income' },
-    { label: 'Total Expenses', value: `$${money(totalExpenses)}`, cls: 'expense' },
-    { label: 'Net Savings', value: `$${money(netSavings)}`, cls: netSavings >= 0 ? 'savings' : 'expense' },
-    { label: 'Savings Rate', value: `${percent(savingsRate)}%`, cls: '' },
-    { label: 'Total Invested', value: `$${money(totalInvested)}`, cls: '' },
-    { label: 'Active Goals', value: activeGoals, cls: '' },
+    { label: 'Current Balance', value: money(currentBalance), cls: currentBalance >= 0 ? 'savings' : 'expense' },
+    { label: 'Total Income', value: money(totalIncome), cls: 'income' },
+    { label: 'Total Expenses', value: money(totalExpenses), cls: 'expense' },
+    { label: "This Month's Expenses", value: money(currentMonthExpenses), cls: 'expense' },
   ];
 
   return (

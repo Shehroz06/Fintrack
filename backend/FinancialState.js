@@ -99,11 +99,14 @@ class BudgetingState extends FinancialState {
 
         // Overall spending ratio
         if (totalIncome > 0) {
-            const savingsRate = percent(((Number(totalIncome) - Number(totalExpenses)) / Number(totalIncome)) * 100);
+            const savingsRateValue = ((Number(totalIncome) - Number(totalExpenses)) / Number(totalIncome)) * 100;
+            const savingsRate = percent(savingsRateValue);
             recommendations.push({
-                priority: 'medium',
+                priority: savingsRateValue >= 20 ? 'low' : 'medium',
                 category: 'budgeting',
-                message: `Current savings rate: ${savingsRate}%. Target: 20%+`
+                message: savingsRateValue >= 20
+                    ? `Current savings rate: ${savingsRate}%, above the 20% target. Keep it up.`
+                    : `Current savings rate: ${savingsRate}%. Target: 20%+`
             });
         }
 

@@ -1,9 +1,12 @@
 'use strict';
 
 /**
- * RECOMMENDATION ENGINE - LOCAL RULE-BASED FINANCIAL ADVICE ENGINE
+ * RECOMMENDATION ENGINE - GEMINI-POWERED WITH LOCAL RULE-BASED FALLBACK
  *
- * Drop-in replacement for a Gemini-powered recommendation engine.
+ * Uses Gemini for AI-generated tips and ambiguous-transaction categorization
+ * when GEMINI_API_KEY is configured. Falls back to the local rule-based
+ * engine on missing config, API errors, or malformed responses, so the app
+ * keeps working even if Gemini is down or unconfigured.
  *
  * Public methods kept:
  * - generateRecommendations(userData)
@@ -20,6 +23,8 @@
  *   message: string
  * }
  */
+
+const GeminiService = require('./GeminiService');
 
 const DEFAULT_CONFIG = Object.freeze({
   maxRecommendations: 5,
@@ -291,41 +296,53 @@ const CATEGORY_ADVICE = Object.freeze({
 class RecommendationEngine {
   constructor(options = {}) {
     this.engineName = 'local-rule-based-financial-engine';
-    this.version = '1.1.0';
+    this.version = '1.2.0';
     this.config = {
       ...DEFAULT_CONFIG,
       ...options
     };
+    this.gemini = new GeminiService();
   }
 
   /**
    * Generate recommendations from user financial data.
-   * Kept async for compatibility with older Gemini-based code.
+   * Tries Gemini first (if configured), falls back to the local rule engine
+   * on missing config, API errors, or malformed AI responses.
    */
   async generateRecommendations(userData = {}) {
     try {
       const profile = this._normalizeUserData(userData);
       const analysis = this._analyzeFinancialProfile(profile);
-      const recommendations = this._generateRecommendationSet(profile, analysis);
       const summary = this._buildSummary(profile, analysis);
 
-      const responseObject = {
-        recommendations,
-        summary,
-        engine: this.engineName,
-        version: this.version
-      };
+      if (this.gemini.isConfigured()) {
+        try {
+          const recommendations = await this.gemini.generateRecommendations(this._buildPrompt(userData));
+
+          return {
+            success: true,
+            recommendations,
+            summary,
+            fallbackUsed: false,
+            engine: `gemini:${this.gemini.model}`
+          };
+        } catch (aiError) {
+          console.warn('Gemini recommendation generation failed, falling back to local engine:', aiError.message);
+        }
+      }
+
+      const recommendations = this._generateRecommendationSet(profile, analysis);
 
       return {
         success: true,
         recommendations,
         summary,
-        rawResponse: JSON.stringify(responseObject, null, 2),
-        fallbackUsed: false,
+        rawResponse: JSON.stringify({ recommendations, summary, engine: this.engineName }, null, 2),
+        fallbackUsed: true,
         engine: this.engineName
       };
     } catch (error) {
-      console.error('Error generating rule-based recommendations:', error.message);
+      console.error('Error generating recommendations:', error.message);
 
       return {
         success: false,
@@ -337,11 +354,24 @@ class RecommendationEngine {
   }
 
   /**
-   * Categorize transaction using local keyword rules.
-   * Kept async so existing await calls still work.
+   * Categorize a transaction. Local keyword rules run first (free, instant);
+   * Gemini is only consulted when the keyword rules find no match, since
+   * calling it on every transaction would add needless latency and cost.
    */
   async categorizeTransaction(description = '') {
-    return this._categorizeByRules(description);
+    const localCategory = this._categorizeByRules(description);
+
+    if (localCategory !== 'other' || !this.gemini.isConfigured()) {
+      return localCategory;
+    }
+
+    try {
+      const candidateCategories = VALID_TRANSACTION_CATEGORIES.filter((c) => c !== 'other');
+      return await this.gemini.categorizeTransaction(description, candidateCategories);
+    } catch (error) {
+      console.warn('Gemini categorization failed, falling back to local rules:', error.message);
+      return localCategory;
+    }
   }
 
   /**

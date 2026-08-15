@@ -67,6 +67,13 @@ class APIService {
     });
   }
 
+  async updateTransaction(id, transaction) {
+    return this._fetch(`${API_BASE_URL}/transactions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(transaction)
+    });
+  }
+
   async getTransactions(filters = {}) {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') params.set(k, v); });
@@ -85,6 +92,23 @@ class APIService {
 
   async deleteTransaction(transactionId) {
     return this._fetch(`${API_BASE_URL}/transactions/${transactionId}`, { method: 'DELETE' });
+  }
+
+  // ==================== RECURRING TRANSACTIONS ====================
+
+  async createRecurring(rule) {
+    return this._fetch(`${API_BASE_URL}/recurring`, {
+      method: 'POST',
+      body: JSON.stringify(rule)
+    });
+  }
+
+  async getRecurring() {
+    return this._fetch(`${API_BASE_URL}/recurring`);
+  }
+
+  async deleteRecurring(ruleId) {
+    return this._fetch(`${API_BASE_URL}/recurring/${ruleId}`, { method: 'DELETE' });
   }
 
   // ==================== GOALS ====================
@@ -143,12 +167,17 @@ class APIService {
     return this._fetch(`${API_BASE_URL}/portfolio`);
   }
 
-  // ==================== BUDGETING STRATEGY ====================
+  // ==================== BUDGET ====================
 
-  async calculateBudget(strategy, income) {
-    return this._fetch(`${API_BASE_URL}/budgeting-strategy`, {
+  async getBudget(month) {
+    const qs = month ? `?month=${month}` : '';
+    return this._fetch(`${API_BASE_URL}/budget${qs}`);
+  }
+
+  async setBudget(amount, month) {
+    return this._fetch(`${API_BASE_URL}/budget`, {
       method: 'POST',
-      body: JSON.stringify({ strategy, income })
+      body: JSON.stringify({ amount, month })
     });
   }
 
